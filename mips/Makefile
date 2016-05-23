@@ -14,7 +14,7 @@
 
 
 INC_DIR := -I. `pkg-config --cflags systemc` `pkg-config --cflags archc` `pkg-config --cflags tlm`
-LIB_DIR := -L. `pkg-config --libs systemc` -L/home/max/ArchC/archc/master/lib
+LIB_DIR := -L. `pkg-config --libs systemc` 
 
 LIB_SYSTEMC := `pkg-config --libs systemc`
 LIB_ARCHC := `pkg-config --libs archc`
