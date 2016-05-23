@@ -22,9 +22,9 @@ namespace mips_parms {
 
 
 static const unsigned int AC_DEC_FIELD_NUMBER = 13; 	 //!< Number of Fields used by decoder.
-static const unsigned int AC_DEC_INSTR_NUMBER = 58; 	 //!< Number of Instructions declared.
+static const unsigned int AC_DEC_INSTR_NUMBER = 59; 	 //!< Number of Instructions declared.
 static const unsigned int AC_DEC_FORMAT_NUMBER = 3; 	 //!< Number of Formats declared.
-static const unsigned int AC_DEC_LIST_NUMBER = 93; 	 //!< Number of decodification lists used by decoder.
+static const unsigned int AC_DEC_LIST_NUMBER = 96; 	 //!< Number of decodification lists used by decoder.
 static const unsigned int AC_MAX_BUFFER = 4; 	 //!< This is the size needed by decoder buffer. It is equal to the biggest instruction size.
 static const unsigned int AC_WORDSIZE = 32; 	 //!< Architecture wordsize in bits.
 static const unsigned int AC_FETCHSIZE = 32; 	 //!< Architecture fetchsize in bits.

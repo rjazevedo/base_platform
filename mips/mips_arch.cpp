@@ -25,8 +25,7 @@ mips_arch::mips_arch() :
   npc("npc", 0),
   hi("hi", 0),
   lo("lo", 0),
-  id("id", 0),
-  pause("pause", 0) {
+  id("id", 0) {
 
   ac_mt_endian = mips_parms::AC_MATCH_ENDIAN;
   ac_tgt_endian = mips_parms::AC_PROC_ENDIAN;

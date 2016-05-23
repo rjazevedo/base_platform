@@ -23,46 +23,52 @@ void* mips::dispatch() {
   if (ac_qk.need_sync()) {
     ac_qk.sync();
   }
-  if( ac_pc >= DM.get_size()){
+  if( ac_pc >= dec_cache_size){
     cerr << "ArchC: Address out of bounds (pc=0x" << hex << ac_pc << ")." << endl;
     stop();
     longjmp(ac_env, AC_ACTION_STOP);
   }
   ac_instr_counter++;
   unsigned ins_id;
-  bool exec = true;
-
-  if (ac_pc < 0x100) {
-    //!Handling System calls.
-    switch( ac_pc ){
-      #define AC_SYSC(NAME,LOCATION) \
-      case LOCATION: \
-        ISA.syscall.NAME(); \
-        exec = false; \
-        return IntRoutine[0]; \
-      break;
-      #include <ac_syscall.def>
-      #undef AC_SYSC
-
-    } // switch( ac_pc )
-  } // if( ac_pc < 0x100 )
-
-  if (exec) {
+  instr_dec = (DEC_CACHE + (ac_pc));
+  if ( !instr_dec->valid ){
+    unsigned* ins_cache;
     decode_pc = ac_pc;
     quant = 0;
     ins_cache = (ISA.decoder)->Decode(reinterpret_cast<unsigned char*>(buffer), quant);
-    ins_id = ins_cache ? ins_cache[IDENT]: 0;
-
-    if( ins_id == 0 ) {
-      cerr << "ArchC Error: Unidentified instruction. " << endl;
-      cerr << "PC = " << hex << ac_pc << dec << endl;
-      stop();
-      longjmp(ac_env, AC_ACTION_STOP);
+    instr_dec->valid = true;
+    instr_dec->id = ins_cache ? ins_cache[IDENT]: 0;
+    instr_dec->end_rot = IntRoutine[instr_dec->id];
+    switch (ISA.instr_format_table[instr_dec->id]) {
+      case 1:
+        instr_dec->F_Type_R.op = ins_cache[1];
+        instr_dec->F_Type_R.rs = ins_cache[2];
+        instr_dec->F_Type_R.rt = ins_cache[3];
+        instr_dec->F_Type_R.rd = ins_cache[4];
+        instr_dec->F_Type_R.shamt = ins_cache[5];
+        instr_dec->F_Type_R.func = ins_cache[6];
+      break;
+      case 2:
+        instr_dec->F_Type_I.op = ins_cache[1];
+        instr_dec->F_Type_I.rs = ins_cache[2];
+        instr_dec->F_Type_I.rt = ins_cache[3];
+        instr_dec->F_Type_I.imm = ins_cache[7];
+      break;
+      case 3:
+        instr_dec->F_Type_J.op = ins_cache[1];
+        instr_dec->F_Type_J.addr = ins_cache[8];
+      break;
+      default:
+        cerr << "ArchC Error: Unidentified instruction. " << endl;
+        cerr << "PC = " << hex << ac_pc << dec << endl;
+        stop();
+        longjmp(ac_env, AC_ACTION_STOP);
     }
+  }
+  ins_id = instr_dec->id;
 
-    ISA.cur_instr_id = ins_id;
-  } // if (exec)
-  return IntRoutine[ins_id];
+  ISA.cur_instr_id = ins_id;
+  return instr_dec->end_rot;
 }
 
 void mips::behavior() {
@@ -73,12 +79,12 @@ void mips::behavior() {
               &&I_slti, &&I_sltiu, &&I_andi, &&I_ori, &&I_xori, 
               &&I_lui, &&I_add, &&I_addu, &&I_sub, &&I_subu, 
               &&I_slt, &&I_sltu, &&I_instr_and, &&I_instr_or, &&I_instr_xor, 
-              &&I_instr_nor, &&I_sll, &&I_srl, &&I_sra, &&I_sllv, 
-              &&I_srlv, &&I_srav, &&I_mult, &&I_multu, &&I_div, 
-              &&I_divu, &&I_mfhi, &&I_mthi, &&I_mflo, &&I_mtlo, 
-              &&I_j, &&I_jal, &&I_jr, &&I_jalr, &&I_beq, 
-              &&I_bne, &&I_blez, &&I_bgtz, &&I_bltz, &&I_bgez, 
-              &&I_bltzal, &&I_bgezal, &&I_sys_call, &&I_instr_break};
+              &&I_instr_nor, &&I_nop, &&I_sll, &&I_srl, &&I_sra, 
+              &&I_sllv, &&I_srlv, &&I_srav, &&I_mult, &&I_multu, 
+              &&I_div, &&I_divu, &&I_mfhi, &&I_mthi, &&I_mflo, 
+              &&I_mtlo, &&I_j, &&I_jal, &&I_jr, &&I_jalr, 
+              &&I_beq, &&I_bne, &&I_blez, &&I_bgtz, &&I_bltz, 
+              &&I_bgez, &&I_bltzal, &&I_bgezal, &&I_sys_call, &&I_instr_break};
 
   IntRoutine = vet;
 
@@ -88,415 +94,439 @@ void mips::behavior() {
     has_delayed_load = false;
   }
 
+  #define AC_SYSC(NAME,LOCATION) \
+  instr_dec = (DEC_CACHE + (LOCATION)); \
+  instr_dec->valid = true; \
+  instr_dec->id = 0; \
+  instr_dec->end_rot = &&Sys_##LOCATION;
+
+  #include <ac_syscall.def>
+  #undef AC_SYSC
+
   int action = setjmp(ac_env);
   if (action == AC_ACTION_STOP) return;
 
   I_Init:
     goto *dispatch();
 
+  #define AC_SYSC(NAME,LOCATION) \
+  Sys_##LOCATION: \
+    ISA.syscall.NAME(); \
+    goto *dispatch();
+
+  #include <ac_syscall.def>
+  #undef AC_SYSC
+
   I_lb: // Instruction lb
-    ISA._behavior_instruction(ins_cache[1]);
-    ISA._behavior_mips_Type_I(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[7]);
-    ISA.behavior_lb(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[7]);
+    ISA._behavior_instruction(instr_dec->F_Type_I.op);
+    ISA._behavior_mips_Type_I(instr_dec->F_Type_I.op, instr_dec->F_Type_I.rs, instr_dec->F_Type_I.rt, instr_dec->F_Type_I.imm);
+    ISA.behavior_lb(instr_dec->F_Type_I.op, instr_dec->F_Type_I.rs, instr_dec->F_Type_I.rt, instr_dec->F_Type_I.imm);
     ac_qk.inc(time_1cycle);
     goto *dispatch();
 
   I_lbu: // Instruction lbu
-    ISA._behavior_instruction(ins_cache[1]);
-    ISA._behavior_mips_Type_I(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[7]);
-    ISA.behavior_lbu(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[7]);
+    ISA._behavior_instruction(instr_dec->F_Type_I.op);
+    ISA._behavior_mips_Type_I(instr_dec->F_Type_I.op, instr_dec->F_Type_I.rs, instr_dec->F_Type_I.rt, instr_dec->F_Type_I.imm);
+    ISA.behavior_lbu(instr_dec->F_Type_I.op, instr_dec->F_Type_I.rs, instr_dec->F_Type_I.rt, instr_dec->F_Type_I.imm);
     ac_qk.inc(time_1cycle);
     goto *dispatch();
 
   I_lh: // Instruction lh
-    ISA._behavior_instruction(ins_cache[1]);
-    ISA._behavior_mips_Type_I(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[7]);
-    ISA.behavior_lh(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[7]);
+    ISA._behavior_instruction(instr_dec->F_Type_I.op);
+    ISA._behavior_mips_Type_I(instr_dec->F_Type_I.op, instr_dec->F_Type_I.rs, instr_dec->F_Type_I.rt, instr_dec->F_Type_I.imm);
+    ISA.behavior_lh(instr_dec->F_Type_I.op, instr_dec->F_Type_I.rs, instr_dec->F_Type_I.rt, instr_dec->F_Type_I.imm);
     ac_qk.inc(time_1cycle);
     goto *dispatch();
 
   I_lhu: // Instruction lhu
-    ISA._behavior_instruction(ins_cache[1]);
-    ISA._behavior_mips_Type_I(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[7]);
-    ISA.behavior_lhu(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[7]);
+    ISA._behavior_instruction(instr_dec->F_Type_I.op);
+    ISA._behavior_mips_Type_I(instr_dec->F_Type_I.op, instr_dec->F_Type_I.rs, instr_dec->F_Type_I.rt, instr_dec->F_Type_I.imm);
+    ISA.behavior_lhu(instr_dec->F_Type_I.op, instr_dec->F_Type_I.rs, instr_dec->F_Type_I.rt, instr_dec->F_Type_I.imm);
     ac_qk.inc(time_1cycle);
     goto *dispatch();
 
   I_lw: // Instruction lw
-    ISA._behavior_instruction(ins_cache[1]);
-    ISA._behavior_mips_Type_I(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[7]);
-    ISA.behavior_lw(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[7]);
+    ISA._behavior_instruction(instr_dec->F_Type_I.op);
+    ISA._behavior_mips_Type_I(instr_dec->F_Type_I.op, instr_dec->F_Type_I.rs, instr_dec->F_Type_I.rt, instr_dec->F_Type_I.imm);
+    ISA.behavior_lw(instr_dec->F_Type_I.op, instr_dec->F_Type_I.rs, instr_dec->F_Type_I.rt, instr_dec->F_Type_I.imm);
     ac_qk.inc(time_1cycle);
     goto *dispatch();
 
   I_lwl: // Instruction lwl
-    ISA._behavior_instruction(ins_cache[1]);
-    ISA._behavior_mips_Type_I(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[7]);
-    ISA.behavior_lwl(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[7]);
+    ISA._behavior_instruction(instr_dec->F_Type_I.op);
+    ISA._behavior_mips_Type_I(instr_dec->F_Type_I.op, instr_dec->F_Type_I.rs, instr_dec->F_Type_I.rt, instr_dec->F_Type_I.imm);
+    ISA.behavior_lwl(instr_dec->F_Type_I.op, instr_dec->F_Type_I.rs, instr_dec->F_Type_I.rt, instr_dec->F_Type_I.imm);
     ac_qk.inc(time_1cycle);
     goto *dispatch();
 
   I_lwr: // Instruction lwr
-    ISA._behavior_instruction(ins_cache[1]);
-    ISA._behavior_mips_Type_I(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[7]);
-    ISA.behavior_lwr(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[7]);
+    ISA._behavior_instruction(instr_dec->F_Type_I.op);
+    ISA._behavior_mips_Type_I(instr_dec->F_Type_I.op, instr_dec->F_Type_I.rs, instr_dec->F_Type_I.rt, instr_dec->F_Type_I.imm);
+    ISA.behavior_lwr(instr_dec->F_Type_I.op, instr_dec->F_Type_I.rs, instr_dec->F_Type_I.rt, instr_dec->F_Type_I.imm);
     ac_qk.inc(time_1cycle);
     goto *dispatch();
 
   I_sb: // Instruction sb
-    ISA._behavior_instruction(ins_cache[1]);
-    ISA._behavior_mips_Type_I(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[7]);
-    ISA.behavior_sb(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[7]);
+    ISA._behavior_instruction(instr_dec->F_Type_I.op);
+    ISA._behavior_mips_Type_I(instr_dec->F_Type_I.op, instr_dec->F_Type_I.rs, instr_dec->F_Type_I.rt, instr_dec->F_Type_I.imm);
+    ISA.behavior_sb(instr_dec->F_Type_I.op, instr_dec->F_Type_I.rs, instr_dec->F_Type_I.rt, instr_dec->F_Type_I.imm);
     ac_qk.inc(time_1cycle);
     goto *dispatch();
 
   I_sh: // Instruction sh
-    ISA._behavior_instruction(ins_cache[1]);
-    ISA._behavior_mips_Type_I(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[7]);
-    ISA.behavior_sh(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[7]);
+    ISA._behavior_instruction(instr_dec->F_Type_I.op);
+    ISA._behavior_mips_Type_I(instr_dec->F_Type_I.op, instr_dec->F_Type_I.rs, instr_dec->F_Type_I.rt, instr_dec->F_Type_I.imm);
+    ISA.behavior_sh(instr_dec->F_Type_I.op, instr_dec->F_Type_I.rs, instr_dec->F_Type_I.rt, instr_dec->F_Type_I.imm);
     ac_qk.inc(time_1cycle);
     goto *dispatch();
 
   I_sw: // Instruction sw
-    ISA._behavior_instruction(ins_cache[1]);
-    ISA._behavior_mips_Type_I(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[7]);
-    ISA.behavior_sw(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[7]);
+    ISA._behavior_instruction(instr_dec->F_Type_I.op);
+    ISA._behavior_mips_Type_I(instr_dec->F_Type_I.op, instr_dec->F_Type_I.rs, instr_dec->F_Type_I.rt, instr_dec->F_Type_I.imm);
+    ISA.behavior_sw(instr_dec->F_Type_I.op, instr_dec->F_Type_I.rs, instr_dec->F_Type_I.rt, instr_dec->F_Type_I.imm);
     ac_qk.inc(time_1cycle);
     goto *dispatch();
 
   I_swl: // Instruction swl
-    ISA._behavior_instruction(ins_cache[1]);
-    ISA._behavior_mips_Type_I(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[7]);
-    ISA.behavior_swl(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[7]);
+    ISA._behavior_instruction(instr_dec->F_Type_I.op);
+    ISA._behavior_mips_Type_I(instr_dec->F_Type_I.op, instr_dec->F_Type_I.rs, instr_dec->F_Type_I.rt, instr_dec->F_Type_I.imm);
+    ISA.behavior_swl(instr_dec->F_Type_I.op, instr_dec->F_Type_I.rs, instr_dec->F_Type_I.rt, instr_dec->F_Type_I.imm);
     ac_qk.inc(time_1cycle);
     goto *dispatch();
 
   I_swr: // Instruction swr
-    ISA._behavior_instruction(ins_cache[1]);
-    ISA._behavior_mips_Type_I(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[7]);
-    ISA.behavior_swr(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[7]);
+    ISA._behavior_instruction(instr_dec->F_Type_I.op);
+    ISA._behavior_mips_Type_I(instr_dec->F_Type_I.op, instr_dec->F_Type_I.rs, instr_dec->F_Type_I.rt, instr_dec->F_Type_I.imm);
+    ISA.behavior_swr(instr_dec->F_Type_I.op, instr_dec->F_Type_I.rs, instr_dec->F_Type_I.rt, instr_dec->F_Type_I.imm);
     ac_qk.inc(time_1cycle);
     goto *dispatch();
 
   I_addi: // Instruction addi
-    ISA._behavior_instruction(ins_cache[1]);
-    ISA._behavior_mips_Type_I(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[7]);
-    ISA.behavior_addi(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[7]);
-    ac_qk.inc(time_1cycle);
+    ISA._behavior_instruction(instr_dec->F_Type_I.op);
+    ISA._behavior_mips_Type_I(instr_dec->F_Type_I.op, instr_dec->F_Type_I.rs, instr_dec->F_Type_I.rt, instr_dec->F_Type_I.imm);
+    ISA.behavior_addi(instr_dec->F_Type_I.op, instr_dec->F_Type_I.rs, instr_dec->F_Type_I.rt, instr_dec->F_Type_I.imm);
+    ac_qk.inc(time_4cycle);
     goto *dispatch();
 
   I_addiu: // Instruction addiu
-    ISA._behavior_instruction(ins_cache[1]);
-    ISA._behavior_mips_Type_I(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[7]);
-    ISA.behavior_addiu(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[7]);
+    ISA._behavior_instruction(instr_dec->F_Type_I.op);
+    ISA._behavior_mips_Type_I(instr_dec->F_Type_I.op, instr_dec->F_Type_I.rs, instr_dec->F_Type_I.rt, instr_dec->F_Type_I.imm);
+    ISA.behavior_addiu(instr_dec->F_Type_I.op, instr_dec->F_Type_I.rs, instr_dec->F_Type_I.rt, instr_dec->F_Type_I.imm);
     ac_qk.inc(time_1cycle);
     goto *dispatch();
 
   I_slti: // Instruction slti
-    ISA._behavior_instruction(ins_cache[1]);
-    ISA._behavior_mips_Type_I(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[7]);
-    ISA.behavior_slti(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[7]);
+    ISA._behavior_instruction(instr_dec->F_Type_I.op);
+    ISA._behavior_mips_Type_I(instr_dec->F_Type_I.op, instr_dec->F_Type_I.rs, instr_dec->F_Type_I.rt, instr_dec->F_Type_I.imm);
+    ISA.behavior_slti(instr_dec->F_Type_I.op, instr_dec->F_Type_I.rs, instr_dec->F_Type_I.rt, instr_dec->F_Type_I.imm);
     ac_qk.inc(time_1cycle);
     goto *dispatch();
 
   I_sltiu: // Instruction sltiu
-    ISA._behavior_instruction(ins_cache[1]);
-    ISA._behavior_mips_Type_I(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[7]);
-    ISA.behavior_sltiu(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[7]);
+    ISA._behavior_instruction(instr_dec->F_Type_I.op);
+    ISA._behavior_mips_Type_I(instr_dec->F_Type_I.op, instr_dec->F_Type_I.rs, instr_dec->F_Type_I.rt, instr_dec->F_Type_I.imm);
+    ISA.behavior_sltiu(instr_dec->F_Type_I.op, instr_dec->F_Type_I.rs, instr_dec->F_Type_I.rt, instr_dec->F_Type_I.imm);
     ac_qk.inc(time_1cycle);
     goto *dispatch();
 
   I_andi: // Instruction andi
-    ISA._behavior_instruction(ins_cache[1]);
-    ISA._behavior_mips_Type_I(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[7]);
-    ISA.behavior_andi(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[7]);
+    ISA._behavior_instruction(instr_dec->F_Type_I.op);
+    ISA._behavior_mips_Type_I(instr_dec->F_Type_I.op, instr_dec->F_Type_I.rs, instr_dec->F_Type_I.rt, instr_dec->F_Type_I.imm);
+    ISA.behavior_andi(instr_dec->F_Type_I.op, instr_dec->F_Type_I.rs, instr_dec->F_Type_I.rt, instr_dec->F_Type_I.imm);
     ac_qk.inc(time_1cycle);
     goto *dispatch();
 
   I_ori: // Instruction ori
-    ISA._behavior_instruction(ins_cache[1]);
-    ISA._behavior_mips_Type_I(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[7]);
-    ISA.behavior_ori(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[7]);
+    ISA._behavior_instruction(instr_dec->F_Type_I.op);
+    ISA._behavior_mips_Type_I(instr_dec->F_Type_I.op, instr_dec->F_Type_I.rs, instr_dec->F_Type_I.rt, instr_dec->F_Type_I.imm);
+    ISA.behavior_ori(instr_dec->F_Type_I.op, instr_dec->F_Type_I.rs, instr_dec->F_Type_I.rt, instr_dec->F_Type_I.imm);
     ac_qk.inc(time_1cycle);
     goto *dispatch();
 
   I_xori: // Instruction xori
-    ISA._behavior_instruction(ins_cache[1]);
-    ISA._behavior_mips_Type_I(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[7]);
-    ISA.behavior_xori(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[7]);
+    ISA._behavior_instruction(instr_dec->F_Type_I.op);
+    ISA._behavior_mips_Type_I(instr_dec->F_Type_I.op, instr_dec->F_Type_I.rs, instr_dec->F_Type_I.rt, instr_dec->F_Type_I.imm);
+    ISA.behavior_xori(instr_dec->F_Type_I.op, instr_dec->F_Type_I.rs, instr_dec->F_Type_I.rt, instr_dec->F_Type_I.imm);
     ac_qk.inc(time_1cycle);
     goto *dispatch();
 
   I_lui: // Instruction lui
-    ISA._behavior_instruction(ins_cache[1]);
-    ISA._behavior_mips_Type_I(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[7]);
-    ISA.behavior_lui(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[7]);
+    ISA._behavior_instruction(instr_dec->F_Type_I.op);
+    ISA._behavior_mips_Type_I(instr_dec->F_Type_I.op, instr_dec->F_Type_I.rs, instr_dec->F_Type_I.rt, instr_dec->F_Type_I.imm);
+    ISA.behavior_lui(instr_dec->F_Type_I.op, instr_dec->F_Type_I.rs, instr_dec->F_Type_I.rt, instr_dec->F_Type_I.imm);
     ac_qk.inc(time_1cycle);
     goto *dispatch();
 
   I_add: // Instruction add
-    ISA._behavior_instruction(ins_cache[1]);
-    ISA._behavior_mips_Type_R(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[4], ins_cache[5], ins_cache[6]);
-    ISA.behavior_add(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[4], ins_cache[5], ins_cache[6]);
-    ac_qk.inc(time_1cycle);
+    ISA._behavior_instruction(instr_dec->F_Type_R.op);
+    ISA._behavior_mips_Type_R(instr_dec->F_Type_R.op, instr_dec->F_Type_R.rs, instr_dec->F_Type_R.rt, instr_dec->F_Type_R.rd, instr_dec->F_Type_R.shamt, instr_dec->F_Type_R.func);
+    ISA.behavior_add(instr_dec->F_Type_R.op, instr_dec->F_Type_R.rs, instr_dec->F_Type_R.rt, instr_dec->F_Type_R.rd, instr_dec->F_Type_R.shamt, instr_dec->F_Type_R.func);
+    ac_qk.inc(time_4cycle);
     goto *dispatch();
 
   I_addu: // Instruction addu
-    ISA._behavior_instruction(ins_cache[1]);
-    ISA._behavior_mips_Type_R(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[4], ins_cache[5], ins_cache[6]);
-    ISA.behavior_addu(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[4], ins_cache[5], ins_cache[6]);
-    ac_qk.inc(time_1cycle);
+    ISA._behavior_instruction(instr_dec->F_Type_R.op);
+    ISA._behavior_mips_Type_R(instr_dec->F_Type_R.op, instr_dec->F_Type_R.rs, instr_dec->F_Type_R.rt, instr_dec->F_Type_R.rd, instr_dec->F_Type_R.shamt, instr_dec->F_Type_R.func);
+    ISA.behavior_addu(instr_dec->F_Type_R.op, instr_dec->F_Type_R.rs, instr_dec->F_Type_R.rt, instr_dec->F_Type_R.rd, instr_dec->F_Type_R.shamt, instr_dec->F_Type_R.func);
+    ac_qk.inc(time_4cycle);
     goto *dispatch();
 
   I_sub: // Instruction sub
-    ISA._behavior_instruction(ins_cache[1]);
-    ISA._behavior_mips_Type_R(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[4], ins_cache[5], ins_cache[6]);
-    ISA.behavior_sub(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[4], ins_cache[5], ins_cache[6]);
-    ac_qk.inc(time_1cycle);
+    ISA._behavior_instruction(instr_dec->F_Type_R.op);
+    ISA._behavior_mips_Type_R(instr_dec->F_Type_R.op, instr_dec->F_Type_R.rs, instr_dec->F_Type_R.rt, instr_dec->F_Type_R.rd, instr_dec->F_Type_R.shamt, instr_dec->F_Type_R.func);
+    ISA.behavior_sub(instr_dec->F_Type_R.op, instr_dec->F_Type_R.rs, instr_dec->F_Type_R.rt, instr_dec->F_Type_R.rd, instr_dec->F_Type_R.shamt, instr_dec->F_Type_R.func);
+    ac_qk.inc(time_4cycle);
     goto *dispatch();
 
   I_subu: // Instruction subu
-    ISA._behavior_instruction(ins_cache[1]);
-    ISA._behavior_mips_Type_R(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[4], ins_cache[5], ins_cache[6]);
-    ISA.behavior_subu(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[4], ins_cache[5], ins_cache[6]);
-    ac_qk.inc(time_1cycle);
+    ISA._behavior_instruction(instr_dec->F_Type_R.op);
+    ISA._behavior_mips_Type_R(instr_dec->F_Type_R.op, instr_dec->F_Type_R.rs, instr_dec->F_Type_R.rt, instr_dec->F_Type_R.rd, instr_dec->F_Type_R.shamt, instr_dec->F_Type_R.func);
+    ISA.behavior_subu(instr_dec->F_Type_R.op, instr_dec->F_Type_R.rs, instr_dec->F_Type_R.rt, instr_dec->F_Type_R.rd, instr_dec->F_Type_R.shamt, instr_dec->F_Type_R.func);
+    ac_qk.inc(time_4cycle);
     goto *dispatch();
 
   I_slt: // Instruction slt
-    ISA._behavior_instruction(ins_cache[1]);
-    ISA._behavior_mips_Type_R(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[4], ins_cache[5], ins_cache[6]);
-    ISA.behavior_slt(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[4], ins_cache[5], ins_cache[6]);
+    ISA._behavior_instruction(instr_dec->F_Type_R.op);
+    ISA._behavior_mips_Type_R(instr_dec->F_Type_R.op, instr_dec->F_Type_R.rs, instr_dec->F_Type_R.rt, instr_dec->F_Type_R.rd, instr_dec->F_Type_R.shamt, instr_dec->F_Type_R.func);
+    ISA.behavior_slt(instr_dec->F_Type_R.op, instr_dec->F_Type_R.rs, instr_dec->F_Type_R.rt, instr_dec->F_Type_R.rd, instr_dec->F_Type_R.shamt, instr_dec->F_Type_R.func);
     ac_qk.inc(time_1cycle);
     goto *dispatch();
 
   I_sltu: // Instruction sltu
-    ISA._behavior_instruction(ins_cache[1]);
-    ISA._behavior_mips_Type_R(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[4], ins_cache[5], ins_cache[6]);
-    ISA.behavior_sltu(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[4], ins_cache[5], ins_cache[6]);
+    ISA._behavior_instruction(instr_dec->F_Type_R.op);
+    ISA._behavior_mips_Type_R(instr_dec->F_Type_R.op, instr_dec->F_Type_R.rs, instr_dec->F_Type_R.rt, instr_dec->F_Type_R.rd, instr_dec->F_Type_R.shamt, instr_dec->F_Type_R.func);
+    ISA.behavior_sltu(instr_dec->F_Type_R.op, instr_dec->F_Type_R.rs, instr_dec->F_Type_R.rt, instr_dec->F_Type_R.rd, instr_dec->F_Type_R.shamt, instr_dec->F_Type_R.func);
     ac_qk.inc(time_1cycle);
     goto *dispatch();
 
   I_instr_and: // Instruction instr_and
-    ISA._behavior_instruction(ins_cache[1]);
-    ISA._behavior_mips_Type_R(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[4], ins_cache[5], ins_cache[6]);
-    ISA.behavior_instr_and(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[4], ins_cache[5], ins_cache[6]);
+    ISA._behavior_instruction(instr_dec->F_Type_R.op);
+    ISA._behavior_mips_Type_R(instr_dec->F_Type_R.op, instr_dec->F_Type_R.rs, instr_dec->F_Type_R.rt, instr_dec->F_Type_R.rd, instr_dec->F_Type_R.shamt, instr_dec->F_Type_R.func);
+    ISA.behavior_instr_and(instr_dec->F_Type_R.op, instr_dec->F_Type_R.rs, instr_dec->F_Type_R.rt, instr_dec->F_Type_R.rd, instr_dec->F_Type_R.shamt, instr_dec->F_Type_R.func);
     ac_qk.inc(time_1cycle);
     goto *dispatch();
 
   I_instr_or: // Instruction instr_or
-    ISA._behavior_instruction(ins_cache[1]);
-    ISA._behavior_mips_Type_R(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[4], ins_cache[5], ins_cache[6]);
-    ISA.behavior_instr_or(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[4], ins_cache[5], ins_cache[6]);
+    ISA._behavior_instruction(instr_dec->F_Type_R.op);
+    ISA._behavior_mips_Type_R(instr_dec->F_Type_R.op, instr_dec->F_Type_R.rs, instr_dec->F_Type_R.rt, instr_dec->F_Type_R.rd, instr_dec->F_Type_R.shamt, instr_dec->F_Type_R.func);
+    ISA.behavior_instr_or(instr_dec->F_Type_R.op, instr_dec->F_Type_R.rs, instr_dec->F_Type_R.rt, instr_dec->F_Type_R.rd, instr_dec->F_Type_R.shamt, instr_dec->F_Type_R.func);
     ac_qk.inc(time_1cycle);
     goto *dispatch();
 
   I_instr_xor: // Instruction instr_xor
-    ISA._behavior_instruction(ins_cache[1]);
-    ISA._behavior_mips_Type_R(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[4], ins_cache[5], ins_cache[6]);
-    ISA.behavior_instr_xor(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[4], ins_cache[5], ins_cache[6]);
+    ISA._behavior_instruction(instr_dec->F_Type_R.op);
+    ISA._behavior_mips_Type_R(instr_dec->F_Type_R.op, instr_dec->F_Type_R.rs, instr_dec->F_Type_R.rt, instr_dec->F_Type_R.rd, instr_dec->F_Type_R.shamt, instr_dec->F_Type_R.func);
+    ISA.behavior_instr_xor(instr_dec->F_Type_R.op, instr_dec->F_Type_R.rs, instr_dec->F_Type_R.rt, instr_dec->F_Type_R.rd, instr_dec->F_Type_R.shamt, instr_dec->F_Type_R.func);
     ac_qk.inc(time_1cycle);
     goto *dispatch();
 
   I_instr_nor: // Instruction instr_nor
-    ISA._behavior_instruction(ins_cache[1]);
-    ISA._behavior_mips_Type_R(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[4], ins_cache[5], ins_cache[6]);
-    ISA.behavior_instr_nor(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[4], ins_cache[5], ins_cache[6]);
+    ISA._behavior_instruction(instr_dec->F_Type_R.op);
+    ISA._behavior_mips_Type_R(instr_dec->F_Type_R.op, instr_dec->F_Type_R.rs, instr_dec->F_Type_R.rt, instr_dec->F_Type_R.rd, instr_dec->F_Type_R.shamt, instr_dec->F_Type_R.func);
+    ISA.behavior_instr_nor(instr_dec->F_Type_R.op, instr_dec->F_Type_R.rs, instr_dec->F_Type_R.rt, instr_dec->F_Type_R.rd, instr_dec->F_Type_R.shamt, instr_dec->F_Type_R.func);
+    ac_qk.inc(time_1cycle);
+    goto *dispatch();
+
+  I_nop: // Instruction nop
+    ISA._behavior_instruction(instr_dec->F_Type_R.op);
+    ISA._behavior_mips_Type_R(instr_dec->F_Type_R.op, instr_dec->F_Type_R.rs, instr_dec->F_Type_R.rt, instr_dec->F_Type_R.rd, instr_dec->F_Type_R.shamt, instr_dec->F_Type_R.func);
+    ISA.behavior_nop(instr_dec->F_Type_R.op, instr_dec->F_Type_R.rs, instr_dec->F_Type_R.rt, instr_dec->F_Type_R.rd, instr_dec->F_Type_R.shamt, instr_dec->F_Type_R.func);
     ac_qk.inc(time_1cycle);
     goto *dispatch();
 
   I_sll: // Instruction sll
-    ISA._behavior_instruction(ins_cache[1]);
-    ISA._behavior_mips_Type_R(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[4], ins_cache[5], ins_cache[6]);
-    ISA.behavior_sll(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[4], ins_cache[5], ins_cache[6]);
+    ISA._behavior_instruction(instr_dec->F_Type_R.op);
+    ISA._behavior_mips_Type_R(instr_dec->F_Type_R.op, instr_dec->F_Type_R.rs, instr_dec->F_Type_R.rt, instr_dec->F_Type_R.rd, instr_dec->F_Type_R.shamt, instr_dec->F_Type_R.func);
+    ISA.behavior_sll(instr_dec->F_Type_R.op, instr_dec->F_Type_R.rs, instr_dec->F_Type_R.rt, instr_dec->F_Type_R.rd, instr_dec->F_Type_R.shamt, instr_dec->F_Type_R.func);
     ac_qk.inc(time_1cycle);
     goto *dispatch();
 
   I_srl: // Instruction srl
-    ISA._behavior_instruction(ins_cache[1]);
-    ISA._behavior_mips_Type_R(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[4], ins_cache[5], ins_cache[6]);
-    ISA.behavior_srl(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[4], ins_cache[5], ins_cache[6]);
+    ISA._behavior_instruction(instr_dec->F_Type_R.op);
+    ISA._behavior_mips_Type_R(instr_dec->F_Type_R.op, instr_dec->F_Type_R.rs, instr_dec->F_Type_R.rt, instr_dec->F_Type_R.rd, instr_dec->F_Type_R.shamt, instr_dec->F_Type_R.func);
+    ISA.behavior_srl(instr_dec->F_Type_R.op, instr_dec->F_Type_R.rs, instr_dec->F_Type_R.rt, instr_dec->F_Type_R.rd, instr_dec->F_Type_R.shamt, instr_dec->F_Type_R.func);
     ac_qk.inc(time_1cycle);
     goto *dispatch();
 
   I_sra: // Instruction sra
-    ISA._behavior_instruction(ins_cache[1]);
-    ISA._behavior_mips_Type_R(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[4], ins_cache[5], ins_cache[6]);
-    ISA.behavior_sra(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[4], ins_cache[5], ins_cache[6]);
+    ISA._behavior_instruction(instr_dec->F_Type_R.op);
+    ISA._behavior_mips_Type_R(instr_dec->F_Type_R.op, instr_dec->F_Type_R.rs, instr_dec->F_Type_R.rt, instr_dec->F_Type_R.rd, instr_dec->F_Type_R.shamt, instr_dec->F_Type_R.func);
+    ISA.behavior_sra(instr_dec->F_Type_R.op, instr_dec->F_Type_R.rs, instr_dec->F_Type_R.rt, instr_dec->F_Type_R.rd, instr_dec->F_Type_R.shamt, instr_dec->F_Type_R.func);
     ac_qk.inc(time_1cycle);
     goto *dispatch();
 
   I_sllv: // Instruction sllv
-    ISA._behavior_instruction(ins_cache[1]);
-    ISA._behavior_mips_Type_R(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[4], ins_cache[5], ins_cache[6]);
-    ISA.behavior_sllv(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[4], ins_cache[5], ins_cache[6]);
+    ISA._behavior_instruction(instr_dec->F_Type_R.op);
+    ISA._behavior_mips_Type_R(instr_dec->F_Type_R.op, instr_dec->F_Type_R.rs, instr_dec->F_Type_R.rt, instr_dec->F_Type_R.rd, instr_dec->F_Type_R.shamt, instr_dec->F_Type_R.func);
+    ISA.behavior_sllv(instr_dec->F_Type_R.op, instr_dec->F_Type_R.rs, instr_dec->F_Type_R.rt, instr_dec->F_Type_R.rd, instr_dec->F_Type_R.shamt, instr_dec->F_Type_R.func);
     ac_qk.inc(time_1cycle);
     goto *dispatch();
 
   I_srlv: // Instruction srlv
-    ISA._behavior_instruction(ins_cache[1]);
-    ISA._behavior_mips_Type_R(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[4], ins_cache[5], ins_cache[6]);
-    ISA.behavior_srlv(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[4], ins_cache[5], ins_cache[6]);
+    ISA._behavior_instruction(instr_dec->F_Type_R.op);
+    ISA._behavior_mips_Type_R(instr_dec->F_Type_R.op, instr_dec->F_Type_R.rs, instr_dec->F_Type_R.rt, instr_dec->F_Type_R.rd, instr_dec->F_Type_R.shamt, instr_dec->F_Type_R.func);
+    ISA.behavior_srlv(instr_dec->F_Type_R.op, instr_dec->F_Type_R.rs, instr_dec->F_Type_R.rt, instr_dec->F_Type_R.rd, instr_dec->F_Type_R.shamt, instr_dec->F_Type_R.func);
     ac_qk.inc(time_1cycle);
     goto *dispatch();
 
   I_srav: // Instruction srav
-    ISA._behavior_instruction(ins_cache[1]);
-    ISA._behavior_mips_Type_R(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[4], ins_cache[5], ins_cache[6]);
-    ISA.behavior_srav(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[4], ins_cache[5], ins_cache[6]);
+    ISA._behavior_instruction(instr_dec->F_Type_R.op);
+    ISA._behavior_mips_Type_R(instr_dec->F_Type_R.op, instr_dec->F_Type_R.rs, instr_dec->F_Type_R.rt, instr_dec->F_Type_R.rd, instr_dec->F_Type_R.shamt, instr_dec->F_Type_R.func);
+    ISA.behavior_srav(instr_dec->F_Type_R.op, instr_dec->F_Type_R.rs, instr_dec->F_Type_R.rt, instr_dec->F_Type_R.rd, instr_dec->F_Type_R.shamt, instr_dec->F_Type_R.func);
     ac_qk.inc(time_1cycle);
     goto *dispatch();
 
   I_mult: // Instruction mult
-    ISA._behavior_instruction(ins_cache[1]);
-    ISA._behavior_mips_Type_R(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[4], ins_cache[5], ins_cache[6]);
-    ISA.behavior_mult(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[4], ins_cache[5], ins_cache[6]);
-    ac_qk.inc(time_1cycle);
+    ISA._behavior_instruction(instr_dec->F_Type_R.op);
+    ISA._behavior_mips_Type_R(instr_dec->F_Type_R.op, instr_dec->F_Type_R.rs, instr_dec->F_Type_R.rt, instr_dec->F_Type_R.rd, instr_dec->F_Type_R.shamt, instr_dec->F_Type_R.func);
+    ISA.behavior_mult(instr_dec->F_Type_R.op, instr_dec->F_Type_R.rs, instr_dec->F_Type_R.rt, instr_dec->F_Type_R.rd, instr_dec->F_Type_R.shamt, instr_dec->F_Type_R.func);
+    ac_qk.inc(time_4cycle);
     goto *dispatch();
 
   I_multu: // Instruction multu
-    ISA._behavior_instruction(ins_cache[1]);
-    ISA._behavior_mips_Type_R(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[4], ins_cache[5], ins_cache[6]);
-    ISA.behavior_multu(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[4], ins_cache[5], ins_cache[6]);
-    ac_qk.inc(time_1cycle);
+    ISA._behavior_instruction(instr_dec->F_Type_R.op);
+    ISA._behavior_mips_Type_R(instr_dec->F_Type_R.op, instr_dec->F_Type_R.rs, instr_dec->F_Type_R.rt, instr_dec->F_Type_R.rd, instr_dec->F_Type_R.shamt, instr_dec->F_Type_R.func);
+    ISA.behavior_multu(instr_dec->F_Type_R.op, instr_dec->F_Type_R.rs, instr_dec->F_Type_R.rt, instr_dec->F_Type_R.rd, instr_dec->F_Type_R.shamt, instr_dec->F_Type_R.func);
+    ac_qk.inc(time_4cycle);
     goto *dispatch();
 
   I_div: // Instruction div
-    ISA._behavior_instruction(ins_cache[1]);
-    ISA._behavior_mips_Type_R(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[4], ins_cache[5], ins_cache[6]);
-    ISA.behavior_div(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[4], ins_cache[5], ins_cache[6]);
-    ac_qk.inc(time_1cycle);
+    ISA._behavior_instruction(instr_dec->F_Type_R.op);
+    ISA._behavior_mips_Type_R(instr_dec->F_Type_R.op, instr_dec->F_Type_R.rs, instr_dec->F_Type_R.rt, instr_dec->F_Type_R.rd, instr_dec->F_Type_R.shamt, instr_dec->F_Type_R.func);
+    ISA.behavior_div(instr_dec->F_Type_R.op, instr_dec->F_Type_R.rs, instr_dec->F_Type_R.rt, instr_dec->F_Type_R.rd, instr_dec->F_Type_R.shamt, instr_dec->F_Type_R.func);
+    ac_qk.inc(sc_time(module_period_ns*30, SC_NS));
     goto *dispatch();
 
   I_divu: // Instruction divu
-    ISA._behavior_instruction(ins_cache[1]);
-    ISA._behavior_mips_Type_R(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[4], ins_cache[5], ins_cache[6]);
-    ISA.behavior_divu(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[4], ins_cache[5], ins_cache[6]);
-    ac_qk.inc(time_1cycle);
+    ISA._behavior_instruction(instr_dec->F_Type_R.op);
+    ISA._behavior_mips_Type_R(instr_dec->F_Type_R.op, instr_dec->F_Type_R.rs, instr_dec->F_Type_R.rt, instr_dec->F_Type_R.rd, instr_dec->F_Type_R.shamt, instr_dec->F_Type_R.func);
+    ISA.behavior_divu(instr_dec->F_Type_R.op, instr_dec->F_Type_R.rs, instr_dec->F_Type_R.rt, instr_dec->F_Type_R.rd, instr_dec->F_Type_R.shamt, instr_dec->F_Type_R.func);
+    ac_qk.inc(sc_time(module_period_ns*30, SC_NS));
     goto *dispatch();
 
   I_mfhi: // Instruction mfhi
-    ISA._behavior_instruction(ins_cache[1]);
-    ISA._behavior_mips_Type_R(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[4], ins_cache[5], ins_cache[6]);
-    ISA.behavior_mfhi(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[4], ins_cache[5], ins_cache[6]);
+    ISA._behavior_instruction(instr_dec->F_Type_R.op);
+    ISA._behavior_mips_Type_R(instr_dec->F_Type_R.op, instr_dec->F_Type_R.rs, instr_dec->F_Type_R.rt, instr_dec->F_Type_R.rd, instr_dec->F_Type_R.shamt, instr_dec->F_Type_R.func);
+    ISA.behavior_mfhi(instr_dec->F_Type_R.op, instr_dec->F_Type_R.rs, instr_dec->F_Type_R.rt, instr_dec->F_Type_R.rd, instr_dec->F_Type_R.shamt, instr_dec->F_Type_R.func);
     ac_qk.inc(time_1cycle);
     goto *dispatch();
 
   I_mthi: // Instruction mthi
-    ISA._behavior_instruction(ins_cache[1]);
-    ISA._behavior_mips_Type_R(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[4], ins_cache[5], ins_cache[6]);
-    ISA.behavior_mthi(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[4], ins_cache[5], ins_cache[6]);
+    ISA._behavior_instruction(instr_dec->F_Type_R.op);
+    ISA._behavior_mips_Type_R(instr_dec->F_Type_R.op, instr_dec->F_Type_R.rs, instr_dec->F_Type_R.rt, instr_dec->F_Type_R.rd, instr_dec->F_Type_R.shamt, instr_dec->F_Type_R.func);
+    ISA.behavior_mthi(instr_dec->F_Type_R.op, instr_dec->F_Type_R.rs, instr_dec->F_Type_R.rt, instr_dec->F_Type_R.rd, instr_dec->F_Type_R.shamt, instr_dec->F_Type_R.func);
     ac_qk.inc(time_1cycle);
     goto *dispatch();
 
   I_mflo: // Instruction mflo
-    ISA._behavior_instruction(ins_cache[1]);
-    ISA._behavior_mips_Type_R(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[4], ins_cache[5], ins_cache[6]);
-    ISA.behavior_mflo(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[4], ins_cache[5], ins_cache[6]);
+    ISA._behavior_instruction(instr_dec->F_Type_R.op);
+    ISA._behavior_mips_Type_R(instr_dec->F_Type_R.op, instr_dec->F_Type_R.rs, instr_dec->F_Type_R.rt, instr_dec->F_Type_R.rd, instr_dec->F_Type_R.shamt, instr_dec->F_Type_R.func);
+    ISA.behavior_mflo(instr_dec->F_Type_R.op, instr_dec->F_Type_R.rs, instr_dec->F_Type_R.rt, instr_dec->F_Type_R.rd, instr_dec->F_Type_R.shamt, instr_dec->F_Type_R.func);
     ac_qk.inc(time_1cycle);
     goto *dispatch();
 
   I_mtlo: // Instruction mtlo
-    ISA._behavior_instruction(ins_cache[1]);
-    ISA._behavior_mips_Type_R(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[4], ins_cache[5], ins_cache[6]);
-    ISA.behavior_mtlo(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[4], ins_cache[5], ins_cache[6]);
+    ISA._behavior_instruction(instr_dec->F_Type_R.op);
+    ISA._behavior_mips_Type_R(instr_dec->F_Type_R.op, instr_dec->F_Type_R.rs, instr_dec->F_Type_R.rt, instr_dec->F_Type_R.rd, instr_dec->F_Type_R.shamt, instr_dec->F_Type_R.func);
+    ISA.behavior_mtlo(instr_dec->F_Type_R.op, instr_dec->F_Type_R.rs, instr_dec->F_Type_R.rt, instr_dec->F_Type_R.rd, instr_dec->F_Type_R.shamt, instr_dec->F_Type_R.func);
     ac_qk.inc(time_1cycle);
     goto *dispatch();
 
   I_j: // Instruction j
-    ISA._behavior_instruction(ins_cache[1]);
-    ISA._behavior_mips_Type_J(ins_cache[1], ins_cache[8]);
-    ISA.behavior_j(ins_cache[1], ins_cache[8]);
+    ISA._behavior_instruction(instr_dec->F_Type_J.op);
+    ISA._behavior_mips_Type_J(instr_dec->F_Type_J.op, instr_dec->F_Type_J.addr);
+    ISA.behavior_j(instr_dec->F_Type_J.op, instr_dec->F_Type_J.addr);
     ac_qk.inc(time_1cycle);
     goto *dispatch();
 
   I_jal: // Instruction jal
-    ISA._behavior_instruction(ins_cache[1]);
-    ISA._behavior_mips_Type_J(ins_cache[1], ins_cache[8]);
-    ISA.behavior_jal(ins_cache[1], ins_cache[8]);
+    ISA._behavior_instruction(instr_dec->F_Type_J.op);
+    ISA._behavior_mips_Type_J(instr_dec->F_Type_J.op, instr_dec->F_Type_J.addr);
+    ISA.behavior_jal(instr_dec->F_Type_J.op, instr_dec->F_Type_J.addr);
     ac_qk.inc(time_1cycle);
     goto *dispatch();
 
   I_jr: // Instruction jr
-    ISA._behavior_instruction(ins_cache[1]);
-    ISA._behavior_mips_Type_R(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[4], ins_cache[5], ins_cache[6]);
-    ISA.behavior_jr(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[4], ins_cache[5], ins_cache[6]);
+    ISA._behavior_instruction(instr_dec->F_Type_R.op);
+    ISA._behavior_mips_Type_R(instr_dec->F_Type_R.op, instr_dec->F_Type_R.rs, instr_dec->F_Type_R.rt, instr_dec->F_Type_R.rd, instr_dec->F_Type_R.shamt, instr_dec->F_Type_R.func);
+    ISA.behavior_jr(instr_dec->F_Type_R.op, instr_dec->F_Type_R.rs, instr_dec->F_Type_R.rt, instr_dec->F_Type_R.rd, instr_dec->F_Type_R.shamt, instr_dec->F_Type_R.func);
     ac_qk.inc(time_1cycle);
     goto *dispatch();
 
   I_jalr: // Instruction jalr
-    ISA._behavior_instruction(ins_cache[1]);
-    ISA._behavior_mips_Type_R(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[4], ins_cache[5], ins_cache[6]);
-    ISA.behavior_jalr(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[4], ins_cache[5], ins_cache[6]);
+    ISA._behavior_instruction(instr_dec->F_Type_R.op);
+    ISA._behavior_mips_Type_R(instr_dec->F_Type_R.op, instr_dec->F_Type_R.rs, instr_dec->F_Type_R.rt, instr_dec->F_Type_R.rd, instr_dec->F_Type_R.shamt, instr_dec->F_Type_R.func);
+    ISA.behavior_jalr(instr_dec->F_Type_R.op, instr_dec->F_Type_R.rs, instr_dec->F_Type_R.rt, instr_dec->F_Type_R.rd, instr_dec->F_Type_R.shamt, instr_dec->F_Type_R.func);
     ac_qk.inc(time_1cycle);
     goto *dispatch();
 
   I_beq: // Instruction beq
-    ISA._behavior_instruction(ins_cache[1]);
-    ISA._behavior_mips_Type_I(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[7]);
-    ISA.behavior_beq(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[7]);
+    ISA._behavior_instruction(instr_dec->F_Type_I.op);
+    ISA._behavior_mips_Type_I(instr_dec->F_Type_I.op, instr_dec->F_Type_I.rs, instr_dec->F_Type_I.rt, instr_dec->F_Type_I.imm);
+    ISA.behavior_beq(instr_dec->F_Type_I.op, instr_dec->F_Type_I.rs, instr_dec->F_Type_I.rt, instr_dec->F_Type_I.imm);
     ac_qk.inc(time_1cycle);
     goto *dispatch();
 
   I_bne: // Instruction bne
-    ISA._behavior_instruction(ins_cache[1]);
-    ISA._behavior_mips_Type_I(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[7]);
-    ISA.behavior_bne(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[7]);
+    ISA._behavior_instruction(instr_dec->F_Type_I.op);
+    ISA._behavior_mips_Type_I(instr_dec->F_Type_I.op, instr_dec->F_Type_I.rs, instr_dec->F_Type_I.rt, instr_dec->F_Type_I.imm);
+    ISA.behavior_bne(instr_dec->F_Type_I.op, instr_dec->F_Type_I.rs, instr_dec->F_Type_I.rt, instr_dec->F_Type_I.imm);
     ac_qk.inc(time_1cycle);
     goto *dispatch();
 
   I_blez: // Instruction blez
-    ISA._behavior_instruction(ins_cache[1]);
-    ISA._behavior_mips_Type_I(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[7]);
-    ISA.behavior_blez(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[7]);
+    ISA._behavior_instruction(instr_dec->F_Type_I.op);
+    ISA._behavior_mips_Type_I(instr_dec->F_Type_I.op, instr_dec->F_Type_I.rs, instr_dec->F_Type_I.rt, instr_dec->F_Type_I.imm);
+    ISA.behavior_blez(instr_dec->F_Type_I.op, instr_dec->F_Type_I.rs, instr_dec->F_Type_I.rt, instr_dec->F_Type_I.imm);
     ac_qk.inc(time_1cycle);
     goto *dispatch();
 
   I_bgtz: // Instruction bgtz
-    ISA._behavior_instruction(ins_cache[1]);
-    ISA._behavior_mips_Type_I(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[7]);
-    ISA.behavior_bgtz(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[7]);
+    ISA._behavior_instruction(instr_dec->F_Type_I.op);
+    ISA._behavior_mips_Type_I(instr_dec->F_Type_I.op, instr_dec->F_Type_I.rs, instr_dec->F_Type_I.rt, instr_dec->F_Type_I.imm);
+    ISA.behavior_bgtz(instr_dec->F_Type_I.op, instr_dec->F_Type_I.rs, instr_dec->F_Type_I.rt, instr_dec->F_Type_I.imm);
     ac_qk.inc(time_1cycle);
     goto *dispatch();
 
   I_bltz: // Instruction bltz
-    ISA._behavior_instruction(ins_cache[1]);
-    ISA._behavior_mips_Type_I(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[7]);
-    ISA.behavior_bltz(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[7]);
+    ISA._behavior_instruction(instr_dec->F_Type_I.op);
+    ISA._behavior_mips_Type_I(instr_dec->F_Type_I.op, instr_dec->F_Type_I.rs, instr_dec->F_Type_I.rt, instr_dec->F_Type_I.imm);
+    ISA.behavior_bltz(instr_dec->F_Type_I.op, instr_dec->F_Type_I.rs, instr_dec->F_Type_I.rt, instr_dec->F_Type_I.imm);
     ac_qk.inc(time_1cycle);
     goto *dispatch();
 
   I_bgez: // Instruction bgez
-    ISA._behavior_instruction(ins_cache[1]);
-    ISA._behavior_mips_Type_I(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[7]);
-    ISA.behavior_bgez(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[7]);
+    ISA._behavior_instruction(instr_dec->F_Type_I.op);
+    ISA._behavior_mips_Type_I(instr_dec->F_Type_I.op, instr_dec->F_Type_I.rs, instr_dec->F_Type_I.rt, instr_dec->F_Type_I.imm);
+    ISA.behavior_bgez(instr_dec->F_Type_I.op, instr_dec->F_Type_I.rs, instr_dec->F_Type_I.rt, instr_dec->F_Type_I.imm);
     ac_qk.inc(time_1cycle);
     goto *dispatch();
 
   I_bltzal: // Instruction bltzal
-    ISA._behavior_instruction(ins_cache[1]);
-    ISA._behavior_mips_Type_I(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[7]);
-    ISA.behavior_bltzal(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[7]);
+    ISA._behavior_instruction(instr_dec->F_Type_I.op);
+    ISA._behavior_mips_Type_I(instr_dec->F_Type_I.op, instr_dec->F_Type_I.rs, instr_dec->F_Type_I.rt, instr_dec->F_Type_I.imm);
+    ISA.behavior_bltzal(instr_dec->F_Type_I.op, instr_dec->F_Type_I.rs, instr_dec->F_Type_I.rt, instr_dec->F_Type_I.imm);
     ac_qk.inc(time_1cycle);
     goto *dispatch();
 
   I_bgezal: // Instruction bgezal
-    ISA._behavior_instruction(ins_cache[1]);
-    ISA._behavior_mips_Type_I(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[7]);
-    ISA.behavior_bgezal(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[7]);
+    ISA._behavior_instruction(instr_dec->F_Type_I.op);
+    ISA._behavior_mips_Type_I(instr_dec->F_Type_I.op, instr_dec->F_Type_I.rs, instr_dec->F_Type_I.rt, instr_dec->F_Type_I.imm);
+    ISA.behavior_bgezal(instr_dec->F_Type_I.op, instr_dec->F_Type_I.rs, instr_dec->F_Type_I.rt, instr_dec->F_Type_I.imm);
     ac_qk.inc(time_1cycle);
     goto *dispatch();
 
   I_sys_call: // Instruction sys_call
-    ISA._behavior_instruction(ins_cache[1]);
-    ISA._behavior_mips_Type_R(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[4], ins_cache[5], ins_cache[6]);
-    ISA.behavior_sys_call(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[4], ins_cache[5], ins_cache[6]);
+    ISA._behavior_instruction(instr_dec->F_Type_R.op);
+    ISA._behavior_mips_Type_R(instr_dec->F_Type_R.op, instr_dec->F_Type_R.rs, instr_dec->F_Type_R.rt, instr_dec->F_Type_R.rd, instr_dec->F_Type_R.shamt, instr_dec->F_Type_R.func);
+    ISA.behavior_sys_call(instr_dec->F_Type_R.op, instr_dec->F_Type_R.rs, instr_dec->F_Type_R.rt, instr_dec->F_Type_R.rd, instr_dec->F_Type_R.shamt, instr_dec->F_Type_R.func);
     ac_qk.inc(time_1cycle);
     goto *dispatch();
 
   I_instr_break: // Instruction instr_break
-    ISA._behavior_instruction(ins_cache[1]);
-    ISA._behavior_mips_Type_R(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[4], ins_cache[5], ins_cache[6]);
-    ISA.behavior_instr_break(ins_cache[1], ins_cache[2], ins_cache[3], ins_cache[4], ins_cache[5], ins_cache[6]);
+    ISA._behavior_instruction(instr_dec->F_Type_R.op);
+    ISA._behavior_mips_Type_R(instr_dec->F_Type_R.op, instr_dec->F_Type_R.rs, instr_dec->F_Type_R.rt, instr_dec->F_Type_R.rd, instr_dec->F_Type_R.shamt, instr_dec->F_Type_R.func);
+    ISA.behavior_instr_break(instr_dec->F_Type_R.op, instr_dec->F_Type_R.rs, instr_dec->F_Type_R.rt, instr_dec->F_Type_R.rd, instr_dec->F_Type_R.shamt, instr_dec->F_Type_R.func);
     ac_qk.inc(time_1cycle);
     goto *dispatch();
 
@@ -515,6 +545,7 @@ void mips::init() {
   cerr << endl << "ArchC: -------------------- Starting Simulation --------------------" << endl;
   InitStat();
   start_up = 0;
+  init_dec_cache();
   signal(SIGINT, sigint_handler);
   signal(SIGTERM, sigint_handler);
   signal(SIGSEGV, sigsegv_handler);
@@ -539,6 +570,7 @@ void mips::init(int ac, char *av[]) {
   cerr << endl << "ArchC: -------------------- Starting Simulation --------------------" << endl;
   InitStat();
   start_up = 0;
+  init_dec_cache();
   signal(SIGINT, sigint_handler);
   signal(SIGTERM, sigint_handler);
   signal(SIGSEGV, sigsegv_handler);
@@ -592,5 +624,6 @@ void mips::PrintStat() {
 void mips::set_proc_freq(unsigned int proc_freq) {
   ac_module::set_proc_freq(proc_freq);
   time_1cycle=sc_time(1*module_period_ns, SC_NS);
+  time_4cycle=sc_time(4*module_period_ns, SC_NS);
 }
 

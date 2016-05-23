@@ -22,12 +22,11 @@
 
 AC_ARCH(mips){
 
-  ac_tlm_port DM:5M;
+  ac_tlm_port   DM:5M;
   ac_regbank RB:32;
   ac_reg npc;
   ac_reg hi, lo;
   ac_reg id;
-  ac_reg pause;
   ac_wordsize 32;
 
   ARCH_CTOR(mips) {

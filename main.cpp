@@ -31,14 +31,14 @@ int sc_main(int ac, char *av[])
   mips mips_proc1("mips");
   //! Bus
   ac_tlm_bus bus("bus");
-// Memory
+  // Memory
   ac_tlm_mem mem("mem");
 
 #ifdef AC_DEBUG
   ac_trace("mips1_proc1.trace");
 #endif 
 
-  mips_proc1.DM_mport(bus.target_export);
+  mips_proc1.DM(bus.target_export);
   bus.MEM_port(mem.target_export);
 
   mips_proc1.init(ac, av);

@@ -80,7 +80,6 @@ ac_tlm_rsp_status ac_tlm_mem::writem( const uint32_t &a , const uint32_t &d )
 ac_tlm_rsp_status ac_tlm_mem::readm( const uint32_t &a , uint32_t &d )
 {
   *((uint32_t *) &d) = *((uint32_t *) &memory[a]);
-
   return SUCCESS;
 }
 

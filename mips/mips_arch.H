@@ -40,7 +40,6 @@ public:
   ac_reg<mips_parms::ac_word> hi;
   ac_reg<mips_parms::ac_word> lo;
   ac_reg<mips_parms::ac_word> id;
-  ac_reg<mips_parms::ac_word> pause;
 
 
   //!Constructor.

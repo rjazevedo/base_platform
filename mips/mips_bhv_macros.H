@@ -44,6 +44,7 @@ typedef ac_memport<mips_parms::ac_word, mips_parms::ac_Hword> ac_memory;
 #define AC_BEHAVIOR_instr_or() mips_parms::mips_isa::behavior_instr_or(uint8_t op, uint8_t rs, uint8_t rt, uint8_t rd, uint8_t shamt, uint8_t func)
 #define AC_BEHAVIOR_instr_xor() mips_parms::mips_isa::behavior_instr_xor(uint8_t op, uint8_t rs, uint8_t rt, uint8_t rd, uint8_t shamt, uint8_t func)
 #define AC_BEHAVIOR_instr_nor() mips_parms::mips_isa::behavior_instr_nor(uint8_t op, uint8_t rs, uint8_t rt, uint8_t rd, uint8_t shamt, uint8_t func)
+#define AC_BEHAVIOR_nop() mips_parms::mips_isa::behavior_nop(uint8_t op, uint8_t rs, uint8_t rt, uint8_t rd, uint8_t shamt, uint8_t func)
 #define AC_BEHAVIOR_sll() mips_parms::mips_isa::behavior_sll(uint8_t op, uint8_t rs, uint8_t rt, uint8_t rd, uint8_t shamt, uint8_t func)
 #define AC_BEHAVIOR_srl() mips_parms::mips_isa::behavior_srl(uint8_t op, uint8_t rs, uint8_t rt, uint8_t rd, uint8_t shamt, uint8_t func)
 #define AC_BEHAVIOR_sra() mips_parms::mips_isa::behavior_sra(uint8_t op, uint8_t rs, uint8_t rt, uint8_t rd, uint8_t shamt, uint8_t func)

@@ -41,31 +41,16 @@ using namespace mips_parms;
 static int processors_started = 0;
 #define DEFAULT_STACK_SIZE (256*1024)
 
-void mips_isa::PauseProcessor()
-{
-  pause = 1;
-}
-
-void mips_isa::ResumeProcessor()
-{
-  pause = 0;
-}
-
-
 //!Generic instruction behavior method.
 void ac_behavior( instruction )
 { 
-  dbg_printf("----- PC=%#x ----- %lld\n", (int) ac_pc, ac_instr_counter);
+   dbg_printf("----- PC=%#x ----- %lld\n", (int) ac_pc, ac_instr_counter);
   //  dbg_printf("----- PC=%#x NPC=%#x ----- %lld\n", (int) ac_pc, (int)npc, ac_instr_counter);
 #ifndef NO_NEED_PC_UPDATE
   ac_pc = npc;
   npc = ac_pc + 4;
 #endif 
-
-  while (pause) {
-    wait(1, SC_NS);
-  }
-}
+};
  
 //! Instruction Format behavior methods.
 void ac_behavior( Type_R ){}
@@ -78,7 +63,6 @@ void ac_behavior(begin)
   dbg_printf("@@@ begin behavior @@@\n");
   RB[0] = 0;
   npc = ac_pc + 4;
-  pause = 0;
 
   // Is is not required by the architecture, but makes debug really easier
   for (int regNum = 0; regNum < 32; regNum ++)
@@ -87,8 +71,6 @@ void ac_behavior(begin)
   lo = 0;
 
   RB[29] =  AC_RAM_END - 1024 - processors_started++ * DEFAULT_STACK_SIZE;
-
-
 }
 
 //!Behavior called after finishing simulation
@@ -102,15 +84,9 @@ void ac_behavior(end)
 void ac_behavior( lb )
 {
   char byte;
-  unsigned address, offset;
-  
   dbg_printf("lb r%d, %d(r%d)\n", rt, imm & 0xFFFF, rs);
-  
-  address = RB[rs] + imm;
-  offset = address & 3;
-  byte = (DM.read(address & ~3) >> ((3 - offset) * 8)) & 0xFF;
+  byte = DATA_PORT->read_byte(RB[rs]+ imm);
   RB[rt] = (ac_Sword)byte ;
-  
   dbg_printf("Result = %#x\n", RB[rt]);
 };
 
@@ -118,14 +94,9 @@ void ac_behavior( lb )
 void ac_behavior( lbu )
 {
   unsigned char byte;
-  unsigned address, offset;
-  
   dbg_printf("lbu r%d, %d(r%d)\n", rt, imm & 0xFFFF, rs);
-  address = RB[rs] + imm;
-  offset = address & 3;
-  byte = (DM.read(address & ~3) >> ((3 - offset) * 8)) & 0xFF;
-  
-  RB[rt] = byte;
+  byte = DATA_PORT->read_byte(RB[rs]+ imm);
+  RB[rt] = byte ;
   dbg_printf("Result = %#x\n", RB[rt]);
 };
 
@@ -133,14 +104,9 @@ void ac_behavior( lbu )
 void ac_behavior( lh )
 {
   short int half;
-  unsigned address, offset;
-  
   dbg_printf("lh r%d, %d(r%d)\n", rt, imm & 0xFFFF, rs);
-  address = RB[rs]+ imm;
-  offset = (address & 3) >> 1;
-  half = (DM.read(address & ~3) >> (1 - offset) * 16) & 0xFFFF;
-  
-  RB[rt] = (ac_Sword) half;
+  half = DATA_PORT->read_half(RB[rs]+ imm);
+  RB[rt] = (ac_Sword)half ;
   dbg_printf("Result = %#x\n", RB[rt]);
 };
 
@@ -148,14 +114,8 @@ void ac_behavior( lh )
 void ac_behavior( lhu )
 {
   unsigned short int  half;
-  unsigned address, offset;
-
-  dbg_printf("lhu r%d, %d(r%d)\n", rt, imm & 0xFFFF, rs);
-  address = RB[rs]+ imm;
-  offset = (address & 3) >> 1;
-  half = (DM.read(address & ~3) >> (1 - offset) * 16) & 0xFFFF;
-  
-  RB[rt] = half;
+  half = DATA_PORT->read_half(RB[rs]+ imm);
+  RB[rt] = half ;
   dbg_printf("Result = %#x\n", RB[rt]);
 };
 
@@ -163,7 +123,7 @@ void ac_behavior( lhu )
 void ac_behavior( lw )
 {
   dbg_printf("lw r%d, %d(r%d)\n", rt, imm & 0xFFFF, rs);
-  RB[rt] = DM.read(RB[rs]+ imm);
+  RB[rt] = DATA_PORT->read(RB[rs]+ imm);
   dbg_printf("Result = %#x\n", RB[rt]);
 };
 
@@ -176,7 +136,7 @@ void ac_behavior( lwl )
 
   addr = RB[rs] + imm;
   offset = (addr & 0x3) * 8;
-  data = DM.read(addr & 0xFFFFFFFC);
+  data = DATA_PORT->read(addr & 0xFFFFFFFC);
   data <<= offset;
   data |= RB[rt] & ((1<<offset)-1);
   RB[rt] = data;
@@ -192,7 +152,7 @@ void ac_behavior( lwr )
 
   addr = RB[rs] + imm;
   offset = (3 - (addr & 0x3)) * 8;
-  data = DM.read(addr & 0xFFFFFFFC);
+  data = DATA_PORT->read(addr & 0xFFFFFFFC);
   data >>= offset;
   data |= RB[rt] & (0xFFFFFFFF << (32-offset));
   RB[rt] = data;
@@ -203,17 +163,9 @@ void ac_behavior( lwr )
 void ac_behavior( sb )
 {
   unsigned char byte;
-  unsigned address, offset_ammount;
-  ac_word data;
-  
   dbg_printf("sb r%d, %d(r%d)\n", rt, imm & 0xFFFF, rs);
-  
-  address = RB[rs] + imm;
-  offset_ammount = (3 - (address & 3)) * 8;
   byte = RB[rt] & 0xFF;
-  data = DM.read(address & ~3) & ~(0xFF << offset_ammount) | (byte << offset_ammount); 
-  DM.write(address & ~3, data);
-  
+  DATA_PORT->write_byte(RB[rs] + imm, byte);
   dbg_printf("Result = %#x\n", (int) byte);
 };
 
@@ -221,17 +173,9 @@ void ac_behavior( sb )
 void ac_behavior( sh )
 {
   unsigned short int half;
-  unsigned address, offset_ammount;
-  ac_word data;
-  
   dbg_printf("sh r%d, %d(r%d)\n", rt, imm & 0xFFFF, rs);
-  
-  address = RB[rs] + imm;
-  offset_ammount = (1 - ((address & 3) >> 1)) * 16;
   half = RB[rt] & 0xFFFF;
-  data = DM.read(address & ~3) & ~(0xFFFF << offset_ammount) | (half << offset_ammount);
-  DM.write(address & ~3, data);
-  
+  DATA_PORT->write_half(RB[rs] + imm, half);
   dbg_printf("Result = %#x\n", (int) half);
 };
 
@@ -239,7 +183,7 @@ void ac_behavior( sh )
 void ac_behavior( sw )
 {
   dbg_printf("sw r%d, %d(r%d)\n", rt, imm & 0xFFFF, rs);
-  DM.write(RB[rs] + imm, RB[rt]);
+  DATA_PORT->write(RB[rs] + imm, RB[rt]);
   dbg_printf("Result = %#x\n", RB[rt]);
 };
 
@@ -254,8 +198,8 @@ void ac_behavior( swl )
   offset = (addr & 0x3) * 8;
   data = RB[rt];
   data >>= offset;
-  data |= DM.read(addr & 0xFFFFFFFC) & (0xFFFFFFFF << (32-offset));
-  DM.write(addr & 0xFFFFFFFC, data);
+  data |= DATA_PORT->read(addr & 0xFFFFFFFC) & (0xFFFFFFFF << (32-offset));
+  DATA_PORT->write(addr & 0xFFFFFFFC, data);
   dbg_printf("Result = %#x\n", data);
 };
 
@@ -270,8 +214,8 @@ void ac_behavior( swr )
   offset = (3 - (addr & 0x3)) * 8;
   data = RB[rt];
   data <<= offset;
-  data |= DM.read(addr & 0xFFFFFFFC) & ((1<<offset)-1);
-  DM.write(addr & 0xFFFFFFFC, data);
+  data |= DATA_PORT->read(addr & 0xFFFFFFFC) & ((1<<offset)-1);
+  DATA_PORT->write(addr & 0xFFFFFFFC, data);
   dbg_printf("Result = %#x\n", data);
 };
 
@@ -455,6 +399,11 @@ void ac_behavior( instr_nor )
   dbg_printf("Result = %#x\n", RB[rd]);
 };
 
+//!Instruction nop behavior method.
+void ac_behavior( nop )
+{  
+  dbg_printf("nop\n");
+};
 
 //!Instruction sll behavior method.
 void ac_behavior( sll )

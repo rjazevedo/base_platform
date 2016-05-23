@@ -44,10 +44,6 @@ public:
   mips_syscall syscall;
   int cur_instr_id;
 
-
-    void PauseProcessor();
-    void ResumeProcessor();
-  
   //!Constructor.
   mips_isa(mips_arch& ref) : mips_arch_ref(ref) , syscall(ref) {
     //!Building Decoder.
@@ -100,6 +96,7 @@ public:
   inline __attribute__((always_inline)) void behavior_instr_or(uint8_t op, uint8_t rs, uint8_t rt, uint8_t rd, uint8_t shamt, uint8_t func);
   inline __attribute__((always_inline)) void behavior_instr_xor(uint8_t op, uint8_t rs, uint8_t rt, uint8_t rd, uint8_t shamt, uint8_t func);
   inline __attribute__((always_inline)) void behavior_instr_nor(uint8_t op, uint8_t rs, uint8_t rt, uint8_t rd, uint8_t shamt, uint8_t func);
+  inline __attribute__((always_inline)) void behavior_nop(uint8_t op, uint8_t rs, uint8_t rt, uint8_t rd, uint8_t shamt, uint8_t func);
   inline __attribute__((always_inline)) void behavior_sll(uint8_t op, uint8_t rs, uint8_t rt, uint8_t rd, uint8_t shamt, uint8_t func);
   inline __attribute__((always_inline)) void behavior_srl(uint8_t op, uint8_t rs, uint8_t rt, uint8_t rd, uint8_t shamt, uint8_t func);
   inline __attribute__((always_inline)) void behavior_sra(uint8_t op, uint8_t rs, uint8_t rt, uint8_t rd, uint8_t shamt, uint8_t func);
