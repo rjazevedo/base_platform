@@ -50,6 +50,12 @@ private:
   } T_Type_J;
 
   typedef struct {
+    uint8_t op;
+    uint32_t code;
+    uint8_t func;
+  } T_Type_S;
+
+  typedef struct {
     bool valid;
     void* end_rot;
     unsigned id;
@@ -57,6 +63,7 @@ private:
       T_Type_R F_Type_R;
       T_Type_I F_Type_I;
       T_Type_J F_Type_J;
+      T_Type_S F_Type_S;
     };
   } DecCacheItem ;
 
