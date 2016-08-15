@@ -4,11 +4,19 @@
 
 Make sure that you installed the ArchC project ( [github.com/ArchC/ArchC] (https://www.github.com/ArchC/ArchC) ).
 
+To prepare the environment for the fist execution:
+
+```bash
+git submodule --init
+./builddeps.sh
+```
+
 To compile and execute the platform:
 
 ```bash
-make
-make run
+source env.sh
+make 
+make all
 ```
 
 
