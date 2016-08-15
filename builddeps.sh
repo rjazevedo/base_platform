@@ -1,7 +1,7 @@
 #!/bin/bash
 
 BASE=$PWD
-cd ${base}/systemc
+cd ${BASE}/systemc
 ./autogen.sh
 ./configure --prefix=${BASE}/install/systemc
 make all install
