@@ -18,7 +18,7 @@
 
 #include  "mips_parms.H"
 #include  "ac_arch_dec_if.H"
-#include  "ac_storage.H"
+#include  "ac_mem.H"
 #include  "ac_memport.H"
 #include  "ac_regbank.H"
 #include  "ac_reg.H"

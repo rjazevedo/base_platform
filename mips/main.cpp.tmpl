@@ -14,7 +14,7 @@
  
 
 const char *project_name="mips";
-const char *project_file="mips_tlm1.ac";
+const char *project_file="mips.ac";
 const char *archc_version="2.4.1";
 const char *archc_options="";
 
