@@ -16,7 +16,7 @@ git submodule update --init --recursive
 To compile and execute the platform:
 
 ```bash
-source env.sh
+source acenv.sh
 make 
 make all
 ```
