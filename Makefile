@@ -22,6 +22,7 @@ export CFLAGS:=-g $(OTHER)
 export CC:=g++ 
 
 all: 
+	if [ ! -f mips/Makefile ] ; then cd mips ; acsim mips.ac ; cd .. ; fi
 	for c in $(COMPONENTS); do echo " => Making" $$c ...; \
 	    cd $$c; $(MAKE); cd ..; done
 	echo " => Making sw ..."
@@ -36,6 +37,17 @@ clean:
 	cd sw ; $(MAKE) clean
 	echo " => Making platform ..."
 	rm -f $(OBJS) $(EXE) *~ *.o
+	
+distclean:
+	for c in $(COMPONENTS); do echo " => Making" $$c ...; \
+	    cd $$c; $(MAKE) distclean ; cd ..; done	
+	echo " => Making sw ..."
+	cd sw ; $(MAKE) clean
+	echo " => Making platform ..."
+	rm -f $(OBJS) $(EXE) *~ *.o
+	
+	
+	
 
 #------------------------------------------------------
 .SILENT:
@@ -52,9 +64,6 @@ main.o:
 #------------------------------------------------------
 run: $(EXE)
 	./$(EXE) -- sw/hello_world.mips
-#------------------------------------------------------
-#------------------------------------------------------
-distclean: clean
 #------------------------------------------------------
 .cpp.o:
 	$(CC) $(CFLAGS) $(INC_DIR) -c $<
