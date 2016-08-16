@@ -23,7 +23,7 @@ export CFLAGS:=-g $(OTHER)
 export CC:=g++ 
 
 all: 
-	if [ ! -f mips/Makefile ] ; then cd mips ; acsim mips.ac ; cd .. ; fi
+	if [ ! -f mips/Makefile ] ; then cd mips ; echo " => Creating MIPS model ..." ; acsim mips.ac ; cd .. ; fi
 	for c in $(COMPONENTS); do echo " => Making" $$c ...; \
 	    cd $$c; $(MAKE); cd ..; done
 	echo " => Making sw ..."
