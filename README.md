@@ -7,6 +7,8 @@ Make sure that you installed the ArchC project ( [github.com/ArchC/ArchC] (https
 To prepare the environment for the fist execution:
 
 ```bash
+git clone https://github.com/rjazevedo/base_platform.git
+cd base_platform
 git submodule update --init --recursive
 ./builddeps.sh
 ```
