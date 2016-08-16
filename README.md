@@ -1,15 +1,20 @@
-# Platform for teaching purpose #
+# Platform for teaching purpose
 
-## How to use the simple platform? ##
+## Pre-requisites
 
-Make sure that you installed the ArchC project ( [github.com/ArchC/ArchC] (https://www.github.com/ArchC/ArchC) ).
+If you are using Ubuntu 16.04, you will need the following packages:
+
+```bash
+sudo apt-get install git build-essential autoconf libtool flex bison
+```
+
+## How to use the simple platform?
 
 To prepare the environment for the fist execution:
 
 ```bash
 git clone https://github.com/rjazevedo/base_platform.git
 cd base_platform
-git submodule update --init --recursive
 ./builddeps.sh
 ```
 

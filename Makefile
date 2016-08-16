@@ -1,5 +1,6 @@
 TARGET=platform
 EXE = $(TARGET).x
+SW = sw/hello_world.mips
 
 SRCS := main.cpp
 OBJS := $(SRCS:.cpp=.o)
@@ -63,7 +64,7 @@ main.o:
 #all: $(EXE)
 #------------------------------------------------------
 run: $(EXE)
-	./$(EXE) -- sw/hello_world.mips
+	./$(EXE) -- ${SW}
 #------------------------------------------------------
 .cpp.o:
 	$(CC) $(CFLAGS) $(INC_DIR) -c $<
