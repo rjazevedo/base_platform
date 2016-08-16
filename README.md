@@ -17,8 +17,7 @@ To compile and execute the platform:
 
 ```bash
 source acenv.sh
-make 
-make all
+make all run
 ```
 
 
