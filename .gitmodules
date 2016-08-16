@@ -1,6 +1,6 @@
 [submodule "systemc"]
 	path = systemc
-	url = git@github.com:ArchC/SystemC.git
+	url = https://github.com:ArchC/SystemC.git
 [submodule "archc"]
 	path = archc
-	url = git@github.com:ArchC/ArchC.git
+	url = https://github.com:ArchC/ArchC.git
