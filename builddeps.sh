@@ -25,5 +25,5 @@ rm -f archc_mips_toolchain_20141215_64bit.tar.bz2
 
 cd ${BASE}
 cp install/archc/etc/env.sh acenv.sh
-echo "export \$PATH=${BASE}/install/mips-newlib-elf/bin:\$PATH" >> acenv.sh
+echo "export PATH=${BASE}/install/mips-newlib-elf/bin:\$PATH" >> acenv.sh
 
