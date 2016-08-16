@@ -12,4 +12,4 @@ cd ${BASE}/archc
 make all install
 
 cd ${BASE}
-ln -s install/archc/etc/env.sh .
+ln -s install/archc/etc/env.sh acenv.sh
